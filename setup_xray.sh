@@ -29,7 +29,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl unzip jq
 
 info "下载 Xray（获取最新版本）..."
 XRAY_VERSION=$(curl -sf https://api.github.com/repos/XTLS/Xray-core/releases/latest \
-  | grep '"tag_name"' | cut -d'"' -f4)
+  | jq -r '.tag_name')
 [ -z "$XRAY_VERSION" ] && error "无法获取最新版本号，请检查网络"
 info "版本: $XRAY_VERSION"
 curl -L --retry 3 -o /tmp/xray.zip \
