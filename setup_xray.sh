@@ -1,11 +1,11 @@
 #!/bin/bash
-# Xray VLESS+Reality 安装脚本
+# Xray Shadowsocks 安装脚本
 # 用法: sudo bash setup_xray.sh [端口]
-# 默认端口: 443
+# 默认端口: 18444
 # 重复执行: 只更新 Xray 二进制，不会重新生成凭据
 set -e
 
-PORT=${1:-18443}
+PORT=${1:-18444}
 INSTALL_DIR="/usr/local/xray"
 CONFIG_DIR="/etc/xray"
 
@@ -53,35 +53,19 @@ if [ -f "$CONFIG_DIR/config.json" ]; then
 fi
 
 info "首次安装，生成凭据..."
-UUID=$(xray uuid)
-KEYS=$(xray x25519 2>&1)
-PRIVATE_KEY=$(echo "$KEYS" | grep -i 'private' | awk -F':' '{print $2}' | tr -d ' \r\n')
-PUBLIC_KEY=$(echo "$KEYS"  | grep -i 'public'  | awk -F':' '{print $2}' | tr -d ' \r\n')
-[ -z "$PRIVATE_KEY" ] && error "私钥解析失败，xray x25519 原始输出：\n$KEYS"
-[ -z "$PUBLIC_KEY"  ] && error "公钥解析失败，xray x25519 原始输出：\n$KEYS"
-SHORT_ID=$(openssl rand -hex 8)
+SS_PASSWORD=$(openssl rand -base64 16)
 
 cat > "$CONFIG_DIR/config.json" <<EOF
 {
   "log": { "loglevel": "warning" },
   "inbounds": [{
     "port": ${PORT},
-    "protocol": "vless",
+    "protocol": "shadowsocks",
     "settings": {
-      "clients": [{ "id": "${UUID}", "flow": "xtls-rprx-vision" }],
-      "decryption": "none"
-    },
-    "streamSettings": {
-      "network": "tcp",
-      "security": "reality",
-      "realitySettings": {
-        "dest": "microsoft.com:443",
-        "serverNames": ["microsoft.com", "www.microsoft.com"],
-        "privateKey": "${PRIVATE_KEY}",
-        "shortIds": ["${SHORT_ID}"]
-      }
-    },
-    "sniffing": { "enabled": true, "destOverride": ["http","tls","quic"] }
+      "method": "chacha20-ietf-poly1305",
+      "password": "${SS_PASSWORD}",
+      "network": "tcp,udp"
+    }
   }],
   "outbounds": [
     { "protocol": "freedom", "tag": "direct" },
@@ -104,12 +88,13 @@ EOF
 
 systemctl daemon-reload && systemctl enable xray && systemctl restart xray
 
-# 放行端口（先检查是否已存在，避免重复规则）
-iptables  -C INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null \
-  || iptables  -I INPUT -p tcp --dport ${PORT} -j ACCEPT
-ip6tables -C INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null \
-  || ip6tables -I INPUT -p tcp --dport ${PORT} -j ACCEPT
-command -v ufw &>/dev/null && ufw allow ${PORT}/tcp comment "xray" 2>/dev/null || true
+# 放行端口（TCP + UDP）
+iptables  -C INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null || iptables  -I INPUT -p tcp --dport ${PORT} -j ACCEPT
+ip6tables -C INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p tcp --dport ${PORT} -j ACCEPT
+iptables  -C INPUT -p udp --dport ${PORT} -j ACCEPT 2>/dev/null || iptables  -I INPUT -p udp --dport ${PORT} -j ACCEPT
+ip6tables -C INPUT -p udp --dport ${PORT} -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p udp --dport ${PORT} -j ACCEPT
+command -v ufw &>/dev/null && ufw allow ${PORT}/tcp comment "xray-ss" 2>/dev/null || true
+command -v ufw &>/dev/null && ufw allow ${PORT}/udp comment "xray-ss" 2>/dev/null || true
 
 SERVER_IP=$(curl -sf https://api.ipify.org 2>/dev/null \
   || curl -sf https://ifconfig.me 2>/dev/null \
@@ -118,20 +103,17 @@ SERVER_IP=$(curl -sf https://api.ipify.org 2>/dev/null \
 cat > "$CONFIG_DIR/node_params.env" <<EOF
 SERVER_IP=${SERVER_IP}
 PORT=${PORT}
-UUID=${UUID}
-PUBLIC_KEY=${PUBLIC_KEY}
-SHORT_ID=${SHORT_ID}
+SS_PASSWORD=${SS_PASSWORD}
 EOF
 
 echo ""
 echo -e "${CYAN}============================================================${NC}"
 echo -e "${GREEN}  安装完成！复制以下参数备用${NC}"
 echo -e "${CYAN}============================================================${NC}"
-echo -e "  IP         ${YELLOW}${SERVER_IP}${NC}"
-echo -e "  PORT       ${YELLOW}${PORT}${NC}"
-echo -e "  UUID       ${YELLOW}${UUID}${NC}"
-echo -e "  PUBLIC_KEY ${YELLOW}${PUBLIC_KEY}${NC}"
-echo -e "  SHORT_ID   ${YELLOW}${SHORT_ID}${NC}"
+echo -e "  IP          ${YELLOW}${SERVER_IP}${NC}"
+echo -e "  PORT        ${YELLOW}${PORT}${NC}"
+echo -e "  PASSWORD    ${YELLOW}${SS_PASSWORD}${NC}"
+echo -e "  CIPHER      ${YELLOW}chacha20-ietf-poly1305${NC}"
 echo -e "${CYAN}============================================================${NC}"
 echo ""
-echo -e "${YELLOW}⚠ 还需在 OCI 控制台「安全列表」放行 TCP ${PORT} 端口！${NC}"
+echo -e "${YELLOW}⚠ 还需在 OCI 控制台「安全列表」放行 TCP+UDP ${PORT} 端口！${NC}"

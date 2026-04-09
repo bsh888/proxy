@@ -7,7 +7,7 @@ set -e
 INSTALL_DIR="/usr/local/xray"
 CONFIG_DIR="/etc/xray"
 SUB_DIR="/var/www/sub"
-XRAY_PORTS=(18443 18444)   # VLESS 端口, SS 端口
+XRAY_PORTS=(18444)   # SS 端口
 SUB_PORT=18088
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
